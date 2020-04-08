@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta http-equiv="X-UA-Compatible" content="ie=edge">
+	<title></title>
+	<style>
+		* {
+			padding: 0;
+			margin: 0;
+			box-sizing: border-box;
+		}
+		.container {
+			width: 100%;
+			display: flex;
+			display: -webkit-flex;
+			justify-content: space-around;
+			padding-top: 20px;
+		}
+		.video-box {
+			position: relative;
+			width: 800px;
+			height: 400px;
+		}
+		#remote-video {
+			width: 100%;
+			height: 100%;
+			display: block;
+			object-fit: cover;
+			border: 1px solid #eee;
+			background-color: #F2F6FC;
+		}
+		#local-video {
+			position: absolute;
+			right: 0;
+			bottom: 0;
+			width: 240px;
+			height: 120px;
+			object-fit: cover;
+			border: 1px solid #eee;
+			background-color: #EBEEF5;
+		}
+		.start-button {
+			position: absolute;
+			left: 50%;
+			top: 50%;
+			width: 100px;
+			display: none;
+			line-height: 40px;
+			outline: none;
+			color: #fff;
+			background-color: #409eff;
+			border: none;
+			border-radius: 4px;
+			cursor: pointer;
+			transform: translate(-50%, -50%);
+		}
+		.logger {
+			width: 40%;
+			padding: 14px;
+			line-height: 1.5;
+			color: #4fbf40;
+			border-radius: 6px;
+			background-color: #272727;
+		}
+		.logger .error {
+			color: #DD4A68;
+		}
+	</style>
+</head>
+<body>
+	<div class="container">
+		<div class="video-box">
+			<video id="remote-video"></video>
+			<video id="local-video" muted></video>
+			<button class="start-button" onclick="startLive()">start</button>
+		</div>
+		<div class="logger"></div>
+	</div>
+	<script>
+		const message = {
+			el: document.querySelector('.logger'),
+			log (msg) {
+				this.el.innerHTML += `<span>${new Date().toLocaleTimeString()}：${msg}</span><br/>`;
+			},
+			error (msg) {
+				this.el.innerHTML += `<span class="error">${new Date().toLocaleTimeString()}：${msg}</span><br/>`;
+			}
+		};
+		
+		const target = location.search.slice(6);
+		const localVideo = document.querySelector('#local-video');
+		const remoteVideo = document.querySelector('#remote-video');
+		const button = document.querySelector('.start-button');
+
+		localVideo.onloadeddata = () => {
+			message.log('播放本地视频');
+			localVideo.play();
+		}
+		remoteVideo.onloadeddata = () => {
+			message.log('播放对方视频');
+			remoteVideo.play();
+		}
+
+		document.title = target === 'offer' ? '发起方' : '接收方';
+
+		message.log('信令通道（WebSocket）创建中......');
+		const socket = new WebSocket('ws://localhost:8080');
+		socket.onopen = () => {
+			message.log('信令通道创建成功！');
+			target === 'offer' && (button.style.display = 'block');//如果是发起者，则显示开始按钮
+		}
+		socket.onerror = () => message.error('信令通道创建失败！');//websocket启动失败
+		socket.onmessage = e => {//客户端接收到服务端转发的消息
+			const { type, sdp, iceCandidate } = JSON.parse(e.data)
+			if (type === 'answer') {//如果收到应答方的描述，则设置远程描述
+				peer.setRemoteDescription(new RTCSessionDescription({ type, sdp }));
+			} else if (type === 'answer_ice') {//如果收到应答方的候选，则添加候选
+				peer.addIceCandidate(iceCandidate);
+			} else if (type === 'offer') {
+				startLive(new RTCSessionDescription({ type, sdp }));//接收方实例化描述类型
+			} else if (type === 'offer_ice') {//如果收到发起方的候选，则添加候选
+				peer.addIceCandidate(iceCandidate);
+			}
+		};
+
+		const PeerConnection = window.RTCPeerConnection || window.mozRTCPeerConnection || window.webkitRTCPeerConnection;//代表一个本地计算机到远端的webrtc连接，可以对该连接进行控制
+		!PeerConnection && message.error('浏览器不支持WebRTC！');
+		const peer = new PeerConnection();//
+		var dc = peer.createDataChannel("my channel");  
+		dc.onmessage = function (event) {
+     console.log("received: " + event.data);
+	 	 };
+
+			dc.onopen = function () {
+				console.log("datachannel open");
+			};
+
+			dc.onclose = function () {
+				console.log("datachannel close");
+			};
+
+		peer.ontrack = e => {//收到对方流文件时触发
+			if (e && e.streams) {
+				message.log('收到对方音频/视频流数据...');
+				remoteVideo.srcObject = e.streams[0];
+			}
+		};
+
+		peer.onicecandidate = e => {//本地代理ice通过信令服务器发送信息时触发
+			if (e.candidate) {//如果有candidate，应该通过信令服务器将候选者传给对端		
+				message.log('搜集并发送候选人');
+				socket.send(JSON.stringify({
+					type: `${target}_ice`,
+					iceCandidate: e.candidate
+				}));
+			} else {
+				message.log('候选人收集完成！');
+			}
+		};
+
+		async function startLive (sdp) {
+			target === 'offer' && (button.style.display = 'none');//如果是发起方，隐藏按钮
+			let stream;
+			try {
+				message.log('尝试调取本地摄像头/麦克风');
+				stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });//获得音视频轨道
+				message.log('摄像头/麦克风获取成功！');
+				localVideo.srcObject = stream;//将获取的音视频内容加载到video标签
+			} catch {
+				message.error('摄像头/麦克风获取失败！');
+				return;
+			}
+
+			message.log(`------ WebRTC ${target === 'offer' ? '发起方' : '接收方'}流程开始 ------`);
+			message.log('将媒体轨道添加到轨道集');
+			stream.getTracks().forEach(track => {//获得各个轨道，然后发送到对方
+				peer.addTrack(track, stream);
+			});
+
+			if (!sdp) {//如果在发起端点击开始按钮
+				message.log('创建本地SDP');
+				const offer = await peer.createOffer();//创建offer
+				await peer.setLocalDescription(offer);//设置本地描述
+				
+				message.log(`传输发起方本地SDP`);
+				socket.send(JSON.stringify(offer));//{type:'offer',sdp:''} 通过信令服务器发送本地描述
+			} else {//如果是在接收方执行
+				message.log('接收到发送方SDP');
+				await peer.setRemoteDescription(sdp); //接收到offer
+
+				message.log('创建接收方（应答）SDP');
+				const answer = await peer.createAnswer();
+				message.log(`传输接收方（应答）SDP`);
+				console.log(answer)
+				socket.send(JSON.stringify(answer));//{type:'answer',sdp:''}
+				await peer.setLocalDescription(answer);
+			}
+		}
+	</script>
+</body>
+</html>
