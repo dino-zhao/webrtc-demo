@@ -126,7 +126,10 @@
     var dc = peer.createDataChannel("my channel",{negotiated: true, id: 0});
 
 dc.onmessage = function (event) {
-  console.log("received: " + event.data);
+  console.dir(event.data);
+	let img=document.createElement('img')
+	img.src=event.data
+	document.getElementsByClassName('video-box')[0].appendChild(img)
 };
 
 dc.onopen = function () {

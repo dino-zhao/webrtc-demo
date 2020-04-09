@@ -74,13 +74,24 @@
 		<div class="video-box">
 			<video id="remote-video"></video>
       <video id="local-video" muted></video>
-      <button onClick='send()'>发送</button>
+			<button onClick='send()'>发送</button>
+			
+			<input type="file"  id="answer">
+			<button onclick="sendFile()">发送</button>
 		</div>
     <div class="logger"></div>
     
    
 	</div>
 	<script>
+		function sendFile(){
+			var reader = new FileReader();
+			reader.readAsDataURL(document.getElementById('answer').files[0]);
+			reader.onloadend = function(){
+				dc.send(reader.result)
+      };
+			
+		}
 		const message = {
 			el: document.querySelector('.logger'),
 			log (msg) {
@@ -131,7 +142,9 @@ dc.onopen = function () {
 };
 function send(){
   console.dir(dc)
-  dc.send('test')
+	setInterval(()=>{
+		dc.send('test')
+	},200)
 
 }
 dc.onclose = function () {
